@@ -33,6 +33,7 @@ import os
 from absl import flags
 import tensorflow as tf
 from tensorflow.contrib.data.python.ops import threadpool
+import horovod.tensorflow as hvd
 
 from official.resnet import resnet_model
 from official.utils.flags import core as flags_core
@@ -374,9 +375,11 @@ def resnet_model_fn(features, labels, mode, model_class,
     tf.summary.scalar('learning_rate', learning_rate)
 
     optimizer = tf.train.MomentumOptimizer(
-        learning_rate=learning_rate,
+        learning_rate=learning_rate * hvd.size(),
         momentum=momentum
     )
+
+    optimizer = hvd.DistributedOptimizer(optimizer)
 
     def _dense_grad_filter(gvs):
       """Only apply gradient updates to the final layer.
@@ -458,6 +461,7 @@ def resnet_main(
     Dict of results of the run.
   """
 
+  hvd.init()
   model_helpers.apply_clean(flags.FLAGS)
 
   # Ensures flag override logic is only executed if explicitly triggered.
@@ -490,6 +494,8 @@ def resnet_main(
       inter_op_parallelism_threads=flags_obj.inter_op_parallelism_threads,
       intra_op_parallelism_threads=flags_obj.intra_op_parallelism_threads,
       allow_soft_placement=True)
+  session_config.gpu_options.allow_growth = True
+  session_config.gpu_options.visible_device_list = str(hvd.local_rank())
 
   distribution_strategy = distribution_utils.get_distribution_strategy(
       flags_core.get_num_gpus(flags_obj), flags_obj.all_reduce_alg, num_workers)
@@ -510,8 +516,11 @@ def resnet_main(
     warm_start_settings = None
 
   classifier = tf.estimator.Estimator(
-      model_fn=model_function, model_dir=flags_obj.model_dir, config=run_config,
-      warm_start_from=warm_start_settings, params={
+      model_fn=model_function,
+      model_dir=flags_obj.model_dir if hvd.rank() == 0 else None,
+      config=run_config,
+      warm_start_from=warm_start_settings,
+      params={
           'resnet_size': int(flags_obj.resnet_size),
           'data_format': flags_obj.data_format,
           'batch_size': flags_obj.batch_size,
@@ -536,10 +545,14 @@ def resnet_main(
   benchmark_logger.log_run_info('resnet', dataset_name, run_params,
                                 test_id=flags_obj.benchmark_test_id)
 
-  train_hooks = hooks_helper.get_train_hooks(
-      flags_obj.hooks,
-      model_dir=flags_obj.model_dir,
-      batch_size=flags_obj.batch_size)
+  if hvd.rank() == 0:
+    train_hooks = hooks_helper.get_train_hooks(
+        flags_obj.hooks,
+        model_dir=flags_obj.model_dir,
+        batch_size=flags_obj.batch_size)
+  else:
+    train_hooks = []
+  train_hooks.append(hvd.BroadcastGlobalVariablesHook(0))
 
   def input_fn_train(num_epochs):
     return input_function(
@@ -577,8 +590,7 @@ def resnet_main(
     schedule = [flags_obj.epochs_between_evals for _ in range(int(n_loops))]
     schedule[-1] = flags_obj.train_epochs - sum(schedule[:-1])  # over counting.
 
-  use_train_and_evaluate = (num_workers > 1 or
-                            flags_obj.all_reduce_alg == 'collective')
+  use_train_and_evaluate = False
   for cycle_index, num_train_epochs in enumerate(schedule):
     tf.logging.info('Starting cycle: %d/%d', cycle_index, int(n_loops))
 

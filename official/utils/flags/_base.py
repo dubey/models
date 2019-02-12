@@ -99,11 +99,10 @@ def define_base(data_dir=True, model_dir=True, clean=True, train_epochs=True,
   if num_gpu:
     flags.DEFINE_integer(
         name="num_gpus", short_name="ng",
-        default=1 if tf.test.is_gpu_available() else 0,
+        default=0,
         help=help_wrap(
             "How many GPUs to use at each worker with the "
-            "DistributionStrategies API. The default is 1 if TensorFlow can "
-            "detect a GPU, and 0 otherwise."))
+            "DistributionStrategies API. The default is 0."))
 
   if hooks:
     # Construct a pretty summary of hooks.
@@ -137,6 +136,4 @@ def get_num_gpus(flags_obj):
   if flags_obj.num_gpus != -1:
     return flags_obj.num_gpus
 
-  from tensorflow.python.client import device_lib  # pylint: disable=g-import-not-at-top
-  local_device_protos = device_lib.list_local_devices()
-  return sum([1 for d in local_device_protos if d.device_type == "GPU"])
+  return 1
