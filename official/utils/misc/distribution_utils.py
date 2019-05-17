@@ -270,6 +270,8 @@ def configure_cluster(worker_hosts=None, task_index=-1):
     Number of workers in the cluster.
   """
   tf_config = json.loads(os.environ.get('TF_CONFIG', '{}'))
+  tf.compat.v1.logging.info("TF_CONFIG={}".format(tf_config))
+  assert False
   if tf_config:
     num_workers = (len(tf_config['cluster'].get('chief', [])) +
                    len(tf_config['cluster'].get('worker', [])))
