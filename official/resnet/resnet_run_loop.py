@@ -550,7 +550,6 @@ def resnet_main(
   if flags_obj.tf_gpu_thread_mode:
     override_flags_and_set_envars_for_gpu_thread_pool(flags_obj)
 
-  assert False
   # Configures cluster spec for distribution strategy.
   num_workers = distribution_utils.configure_cluster(flags_obj.worker_hosts,
                                                      flags_obj.task_index)
